@@ -28,7 +28,7 @@ public class User{
     {
         Random random = new Random();
         int randomBpm;
-        randomBpm = 50 +random.nextInt(90-50); // generates a bpm between 50 and 90
+        randomBpm = 65 +random.nextInt(90-65); // generates a bpm between 50 and 90
         return randomBpm;
     }
 
@@ -48,11 +48,11 @@ public class User{
 
     public void displayBpm()
     {
-        System.out.println("Bpm : " + bpm);
+        System.out.print("Your bpm : " + bpm);
     }
     public void displayAverage()
     {
-        System.out.println("Average : " + averageLastBpm);
+        System.out.print("    Average : " + averageLastBpm);
     }
 
     //want to return an int/the number of the users bpm
@@ -62,8 +62,8 @@ public class User{
 
     public void updateBpm()
     {
-        int millis = 1500;
-        for (int i = 0; i< 20; i++)
+        int millis = 500;
+        for (int i = 0; i< 100; i++)
         {
             try
             {
@@ -76,23 +76,35 @@ public class User{
 
             if (bpm<100)
             {
-                bpm = updateBpmOneTime(-1, 5);
+                bpm = updateBpmOneTime(-1, 8);
             }
             if (bpm>=100 && bpm<140)
             {
-                bpm = updateBpmOneTime(-1, 2);
+                bpm = updateBpmOneTime(-5, 10);
             }
             if (bpm>=140 && bpm<223-age)
             {
-                bpm = updateBpmOneTime(-1, 0);
+                bpm = updateBpmOneTime(-5, 3);
             }
             
             displayBpm();
             updateAverageBpm(bpm);
 
-            if (i>5)
-            {
-                displayAverage();
+            // if (i>5)
+            // {
+            //     displayAverage();
+            // }
+            System.out.print("\n");
+
+            if(i%10 == 0) {
+                Playlist p = new Playlist();
+                System.out.print("\n");
+                p.chooseMusic(averageLastBpm);
+                System.out.print("\n");
+
+                double realKm = (double)i*0.04;
+                System.out.printf("You already ran :  %.2f  kms", realKm);
+                System.out.print("\n\n");
             }
                 
         }
@@ -111,7 +123,6 @@ public class User{
 
         indexAverageBpm = indexAverageBpm+1;
         indexAverageBpm = indexAverageBpm%5;
-
     }
     
 }
