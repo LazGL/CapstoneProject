@@ -2,10 +2,10 @@
 
 ## Project Overview
 
-**SoundUp** is a Java console application that simulates a running session. It tracks a runner's heart rate (BPM) in real time and dynamically selects music from categorized playlists to match the runner's current exertion level.
+**SoundUp** is a Java Swing application that simulates a running session. It tracks a runner's heart rate (BPM) in real time and dynamically selects music from categorized playlists to match the runner's current exertion level.
 
 **Team:** Lazlo, Erif, Charlotte
-**Language:** Java 21 (no build tool, no external dependencies)
+**Language:** Java 21 — no build tool, no external dependencies
 
 ---
 
@@ -13,17 +13,20 @@
 
 ```
 CapstoneProject/
-├── SoundUp.java          # Main entry point — authentication & race loop
-├── User.java             # Runner model — BPM tracking & playlist triggering
+├── SoundUp.java          # Main entry point — launches the GUI
+├── NewFrame.java         # Swing GUI — all panels, navigation, background thread
+├── User.java             # Runner model — BPM simulation, RaceListener callback
 ├── Playlist.java         # Music loader & BPM-based song selector
 ├── Music.java            # Data model (name, BPM, author)
 ├── Chrono.java           # Stopwatch utility
+├── RaceListener.java     # Callback interface for GUI ↔ simulation communication
+├── RaceHistory.java      # Saves/loads race history to races.csv
 ├── HighBpmMusic.txt      # Songs at 144–210 BPM
 ├── MiddleBpmMusic.txt    # Songs at 102–138 BPM
 ├── LowBpmMusic.txt       # Songs at 20–92 BPM
-├── musics.txt            # Legacy music data file (unused by current code)
-├── NewFrame.form         # NetBeans Swing GUI form (work in progress)
-├── CapstoneProject.zip   # Distribution archive
+├── musics.txt            # Legacy data file (unused)
+├── NewFrame.form         # NetBeans GUI form (reference only — NewFrame.java is the source of truth)
+├── races.csv             # Race history (created at runtime, not tracked in git)
 └── README.md             # Project task list
 ```
 
@@ -35,19 +38,31 @@ CapstoneProject/
 ```bash
 javac *.java
 ```
-All five source files must be compiled together (they share the default package).
 
 ### Run
 ```bash
 java SoundUp
 ```
 
-The application will prompt for:
-1. **Username** — any string
-2. **Password** — any string (no real validation)
-3. **Distance objective (km)** — used to calculate simulated run duration
+A Swing window opens (400×800 px). No console interaction required.
 
-The simulation then runs 100 BPM update iterations at 500 ms intervals (≈50 seconds total), selecting a new song every 10 iterations.
+---
+
+## Application Flow
+
+```
+Sign In / Sign Up
+      ↓
+  Main Menu
+  ↙       ↘
+Race       Past Races
+Setup      (loads races.csv)
+  ↓
+During Race
+(background thread, live BPM + song updates)
+  ↓
+Summary dialog → Main Menu
+```
 
 ---
 
@@ -55,117 +70,124 @@ The simulation then runs 100 BPM update iterations at 500 ms intervals (≈50 se
 
 | Class | Role |
 |---|---|
-| `SoundUp` | Entry point. Reads credentials and distance, creates a `User`, starts the race loop. |
-| `User` | Holds user profile. Generates/updates BPM randomly each iteration. Computes a 5-sample rolling average. Calls `Playlist` every 10 iterations. |
-| `Playlist` | Reads music data from the three `.txt` files on construction. Selects a song matching the current average BPM bracket. |
+| `SoundUp` | Entry point. Calls `SwingUtilities.invokeLater` to open `NewFrame`. |
+| `NewFrame` | Full GUI. Uses `CardLayout` to switch between 6 panels. Starts the race simulation in a daemon background thread. |
+| `User` | Holds user profile. Generates BPM each 500 ms. Calls `RaceListener` callbacks instead of printing. |
+| `Playlist` | Reads the 3 `.txt` music files using `System.getProperty("user.dir")`. Returns a `Music` object from `chooseMusic()`. |
 | `Music` | Plain data object: `name`, `bpm`, `author` with getters/setters. |
-| `Chrono` | Start/stop/elapsed stopwatch with human-readable output. |
+| `Chrono` | Start/stop/elapsed stopwatch. |
+| `RaceListener` | Interface with `onUpdate(bpm, avgBpm, km, song)` and `onFinished(km, seconds)`. |
+| `RaceHistory` | Appends races to `races.csv`; loads them back for the Past Races table. |
 
 ---
 
-## BPM Logic
+## BPM Logic (`User.updateBpm`)
 
-- Every 500 ms a new BPM value is randomly generated (simulating heart rate sensor data).
-- The last **5 BPM readings** are averaged.
-- Every **10 iterations** the average BPM is compared to threshold ranges:
-  - **High BPM** — above the middle range → `HighBpmMusic.txt`
-  - **Middle BPM** — within the middle range → `MiddleBpmMusic.txt`
-  - **Low BPM** — below the middle range → `LowBpmMusic.txt`
-- A random song from the matching playlist is displayed in the console.
+- Takes `distanceKm` — iteration count = `max(10, (int)(distanceKm / 0.04))`.
+- Every 500 ms: BPM changes randomly based on current range:
+  - `< 100 bpm` → change -1 to +7
+  - `100–139 bpm` → change -5 to +9
+  - `140–(223-age) bpm` → change -5 to +2
+- Rolling 5-sample BPM average updated each iteration.
+- Every 10 iterations: `playlist.chooseMusic(avgBpm)` selects a new song.
+- Calls `listener.onUpdate()` every iteration.
+- Calls `listener.onFinished()` when loop ends or thread is interrupted (early stop).
+
+---
+
+## GUI Threading
+
+The simulation runs on a **daemon thread** so the Swing EDT stays free.
+All GUI updates from `RaceListener` callbacks go through `SwingUtilities.invokeLater()`.
+
+Early stop (user presses "End of the race") interrupts the thread via `Thread.interrupt()`.
+The `InterruptedException` in `Thread.sleep()` triggers `listener.onFinished()` with current stats.
 
 ---
 
 ## Data File Format
 
-Each `.txt` playlist file uses one song per line with pipe-delimited fields:
+Each `.txt` playlist file — **3 lines per song**, repeating:
 
 ```
-SongName|AuthorName|BPM
+SongName
+AuthorName
+BPM
 ```
 
 Example (`HighBpmMusic.txt`):
 ```
-Taki Taki|DJ Snake|158
-No Me Ames|Reik|144
+Selfish Love
+DJ snake
+147
 ```
 
-The `Playlist` class parses these with `String.split("\\|")`.
+File path resolved at runtime: `new File(System.getProperty("user.dir"), "HighBpmMusic.txt")`.
+
+---
+
+## Race History Format (`races.csv`)
+
+One race per line, comma-separated:
+```
+distanceKm,durationSeconds,speedKmh
+```
+Example:
+```
+5.00,3750,4.8
+```
+
+Appended after each race. Loaded by `RaceHistory.load()` for the Past Races table.
 
 ---
 
 ## Code Conventions
 
 - **Package:** Default package (no `package` declaration).
-- **Naming:** `PascalCase` for classes, `camelCase` for methods and variables.
+- **Naming:** `PascalCase` for classes, `camelCase` for methods/variables.
 - **One class per file.**
-- **No external libraries** — standard Java library only (`java.io`, `java.util`, `java.lang`).
-- **Comments:** Minimal; some comments are in French (team's primary language).
-- **No logging framework** — output via `System.out.println`.
-
----
-
-## GUI Component (In Progress)
-
-`NewFrame.form` is a NetBeans-generated Swing form (XML). It defines:
-- A `JFrame` (~400×800 px)
-- A **Sign Up** `JButton`
-- A `JTextField` (likely for username input)
-- Uses `AbsoluteLayout` and Comic Sans MS font
-
-The GUI is **not yet wired to the core logic**. If connecting it, the entry point should construct `NewFrame` instead of running the console loop in `SoundUp.main()`.
+- **No external libraries** — standard Java only (`java.awt`, `javax.swing`, `java.io`, `java.util`).
+- GUI updates always via `SwingUtilities.invokeLater()`.
+- Background threads always set as daemon: `thread.setDaemon(true)`.
 
 ---
 
 ## Testing
 
-There is **no automated test suite**. Testing is manual:
-- Compile and run with `javac *.java && java SoundUp`
-- Observe console output for BPM updates and music selections
-- Verify that playlist switching occurs every 10 iterations
-- Verify `Chrono` output format is human-readable (e.g., `0h 0min 50s`)
+No automated test suite. Manual smoke test:
 
-When adding tests, JUnit 5 is the recommended framework for this Java version.
-
----
-
-## Known Issues & Incomplete Features
-
-- **Task #6 (presentation scenario):** Not started per README.
-- **GUI not connected** to business logic.
-- **`musics.txt`** appears unused — `Playlist` only reads the three BPM-specific files.
-- **No input validation** on username/password or distance.
-- **No `.gitignore`** — compiled `.class` files may be committed.
-- **README** contains test/scratch lines (lines 22–25) that should be cleaned up.
+1. `javac *.java && java SoundUp`
+2. Sign in with any name → Main Menu appears.
+3. Start a race with distance 0.4 km (≈10 iterations, ~5 seconds).
+4. Verify BPM, average, distance, and song labels update live.
+5. Let it finish → summary dialog appears → `races.csv` is created.
+6. "See past races" → table shows the saved race.
+7. Run a second race → table shows 2 rows.
+8. Press "End of the race" mid-run → summary still appears, race is saved.
 
 ---
 
 ## Development Workflow
 
-### Branch Conventions
-- Work on feature branches; merge to `main` when complete.
-- Active AI-assisted work uses branches prefixed with `claude/`.
-
-### Making Changes
-1. Edit `.java` source files directly (no build tool configuration needed).
-2. Recompile with `javac *.java` after any change.
-3. Run `java SoundUp` to smoke-test interactively.
-4. Commit with a descriptive message referencing the task number when applicable (e.g., `fix #5 — correct BPM threshold for high playlist`).
-
 ### Adding Music
-Add entries to the appropriate `.txt` file following the `Name|Author|BPM` format. No code changes are needed — `Playlist` reads the files at runtime.
+Add entries to the appropriate `.txt` file (3 lines: name, author, bpm). No code changes needed.
 
 ### Adding a New BPM Category
 1. Create a new `.txt` data file.
-2. Add a new `ArrayList<Music>` field in `Playlist`.
-3. Update `Playlist` constructor to load the new file.
-4. Add a new BPM threshold condition in the selection method.
-5. Update `User` if the triggering logic needs to change.
+2. Add a new `ArrayList<Music>` field in `Playlist` and load it in `readPlaylist()`.
+3. Add a new threshold condition in `chooseMusic()`.
+
+### Changing the Simulation Speed
+Edit the `millis` variable in `User.updateBpm()` (default: 500 ms per iteration).
+
+### Adding User Persistence (future)
+Store `userName` + `age` to a `users.csv` and load on sign-in, similar to `RaceHistory`.
 
 ---
 
 ## Environment
 
 - **Java:** 21 (`java -version` → `21.0.10`)
-- **IDE:** NetBeans (optional — project works with any editor + terminal)
-- **No environment variables required** by the application itself.
-- Container/CI environments may inject `JAVA_TOOL_OPTIONS` with proxy settings — this is expected and harmless.
+- **IDE:** Any editor + terminal; or NetBeans (`.form` file for reference)
+- **No environment variables required** by the application.
+- Compile and run from the project directory so relative file paths resolve correctly.

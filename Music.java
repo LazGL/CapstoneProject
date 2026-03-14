@@ -4,8 +4,6 @@ public class Music {
     private String name;
     private int bpm;
     private String author;
-    private final int timing = 20;
-    
     // constructor
     public Music (String name, int bpm, String author)
     {
